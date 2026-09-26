@@ -1,101 +1,156 @@
-# NightShift
+NightShift
 
-**NightShift is a robot on-call engineer.**
-
-When something breaks in a live app, most teams get a page at 3am and a human has to figure out what went wrong, decide what to do, and fix it — half asleep, under pressure. NightShift is an AI agent that does that job instead, but it's built to be careful: it doesn't just guess and click "fix it." It gathers real evidence, proves its theory in a safe test copy of the app first, and only then acts — and even then, it calls a human to ask permission before touching anything important.
+NightShift is a robot on-call engineer. When a live app breaks, it investigates like a detective, proves its theory in a safe test copy before touching anything real, and calls a human for permission before doing anything risky. If the evidence is weak, it says "I don't know" instead of guessing.
 
 Built for the TrueFoundry × Polaris "Agents That Act" Hackathon.
 
----
+Note on how this was built: we were not given any AI credits for this hackathon. As a result, we were not able to actually run the agents, the model calls, or a live sandbox. Everything here is the complete design plus a scripted, interactive walkthrough (nightshift-mvp.html) that shows exactly how the real system would behave, without needing model access to demonstrate it.
 
-## The problem, in one sentence
+1. The problem, in one sentence
 
-AI agents that can take real actions are powerful, but also scary — if an agent guesses wrong and deletes a database or rolls back the wrong thing, that's worse than doing nothing. NightShift is our attempt at an agent that knows the difference between "I'm confident" and "I'm guessing," and behaves differently in each case.
+Agents that can take real actions are powerful but risky — if one guesses wrong and rolls back the wrong thing, that's worse than doing nothing. NightShift is built to know the difference between "I'm confident" and "I'm guessing," and to behave differently in each case.
 
-## What NightShift actually does, step by step
+2. What NightShift actually does, step by step
+Something breaks. A monitor watches a demo online store and notices when checkouts start failing.
+NightShift investigates like a detective, not a psychic. It reads real logs, real error rates, the real code that was just deployed, and the deploy history. It never just asks a model "what do you think happened" and trusts the first answer.
+It proves the theory, it doesn't just suspect it. It takes the suspect code, runs it in an isolated sandbox, and checks whether it actually fails. Then it checks the previous, working version too, to be sure that one is fine.
+It scores its own confidence. Every piece of evidence adds or subtracts fixed points on a written-down scale — this is arithmetic anyone can double-check, not a feeling the model reports.
+If it's confident enough, it asks permission — every time, for anything risky. It can look things up freely, but it can never roll back a deploy, change a config, or flip a production switch without a human saying yes first. In the demo, that's a real phone call.
+If it's not confident enough, it says "I don't know." If the evidence is mixed, it stops, says so, and lists exactly what additional evidence would help. It never flips a coin.
+After fixing something, it checks its own work. It watches the app for 30 seconds and only calls the incident resolved if error rates, response times, and logs all genuinely look healthy again.
+It writes up what happened. A short incident report, plus a code fix proposal so the same bug can't happen twice.
+3. The system, end to end
+Judge-facing:   Dashboard  ·  Demo store  ·  Judge's phone
+                       │ events / approvals
+Control plane:  Control API  ·  Audit store (SQLite)
+                       │ tool calls
+Harness:        NightShift agent  ·  Chaos agent  ·  Sandbox
+                       │
+Production:     Demo app · Payment mock · Traffic gen · Monitor · Deployer
+                       │
+External:       GitHub  ·  AI Gateway  ·  Voice API
 
-1. **Something breaks.** A small monitoring script is watching a demo online store. When checkouts start failing, it notices.
-2. **NightShift investigates — like a detective, not a psychic.** It reads real logs, real error rates, the real code that was just deployed, and the deploy history. It doesn't ask an AI model "what do you think happened" and trust the first answer.
-3. **NightShift proves it, it doesn't just suspect it.** Before blaming anything, it takes the suspect version of the code, runs it in an isolated sandbox, and checks: does it actually fail? Then it checks the previous, working version too, to make sure that one is fine. This is the difference between "I think it's this" and "I checked, and it's this."
-4. **It scores its own confidence.** Every piece of evidence adds or subtracts points on a fixed, written-down scale (this isn't the AI feeling confident — it's simple arithmetic anyone can double check). Only if the top suspect scores 85% or higher, was actually reproduced, and clearly beats the next-best guess does NightShift consider acting.
-5. **If it's confident enough, it asks permission — every single time, for risky actions.** NightShift can look things up freely, but it can never roll back a deploy, change a config file, or flip a production switch without a human saying yes first. In our demo, that "asking permission" step is a real phone call.
-6. **If it's not confident enough, it says "I don't know."** This is the part most demos skip. If the evidence is mixed — two equally likely causes, or a test that isn't clearly failing — NightShift stops, says so out loud, and tells you exactly what additional evidence would help. It does not flip a coin.
-7. **After fixing something, it checks its own work.** It watches the app for 30 seconds afterward and only calls the incident "resolved" if error rates, response times, and logs all actually look healthy again. If they don't, it says the incident is still open.
-8. **It writes up what happened.** A short plain-English incident report, plus a code change proposal (a pull request) so the same bug can't happen again.
+NightShift and Chaos are separate agents with separate credentials. NightShift can never see the attack menu or the fault-injection tool; Chaos can never see rollback or config tools. That's enforced by what each agent is allowed to connect to — not just a polite instruction in a prompt.
 
-## Why there's a second "evil" agent
+4. What happens during one incident
+no
+yes
+HIGH
+approved
+rejected
+healthy
+not healthy
+Monitor detectsa threshold breach
+NightShift readslogs, metrics, diffs
+Reproduce suspectversion in sandbox
+Score confidenceper candidate cause
+Top ≥ 85%?reproduced?gap 15pts?
+Escalate:'I don't know'
+Action risk
+Call a humanfor approval
+Execute the fix
+Watch metrics 30s
+Postmortem + PR
 
-To prove NightShift isn't just following a script, we built a second agent called **Chaos**. Chaos's whole job is to break the demo app in one of four realistic ways — a bad deploy, a bad config change, an outage in a payment provider NightShift doesn't control, or a deliberately confusing situation with two possible causes at once. A judge picks which one. **NightShift is never told which one was picked.** It has to figure it out from evidence alone, live, in front of everyone.
+Every read (logs, metrics, deploy history) runs on its own — no approval needed. Every write that touches production always pauses for a human, no exceptions, enforced by the system itself, not just the prompt.
 
-## The four ways things can break, and the right response to each
+5. Confidence is math, not vibes
+Evidence	Points
+Problem started right after a change	+20
+The change touches the failing part of the app	+20
+Reproduced the failure on the suspect version	+35
+Previous version is clean when tested the same way	+25
+A third-party service's own status page shows problems	+40
+Suspect version actually passes its tests	−35
 
-| What Chaos does | What actually broke | What NightShift should do |
-|---|---|---|
-| Pushes broken code and deploys it | The app itself | Roll back to the last good version |
-| Changes a config file and deploys it | A setting, not the code | Undo the config change |
-| Makes a third-party payment service fail | Something outside our control | Don't touch our own code — turn on a "retry later" safety switch instead |
-| Both a harmless deploy *and* an outage happen at once, on purpose | Ambiguous — could be either | Admit it doesn't know, and say what evidence is missing |
+NightShift only acts if one theory scores 85%+, was actually reproduced, and beats the next-best guess by more than 15 points. Otherwise it stops and explains what's missing.
 
-That last row is the important one. Most demos are built to show off an agent doing something impressive. We deliberately built in a case where the right answer is for the agent to **do nothing and be honest about why.**
+6. The adversary: Chaos
 
-## How confident is "confident enough"?
+A second agent, Chaos, breaks the demo app one of four ways, picked live by a judge. NightShift is never told which one.
 
-We didn't want "the AI felt sure" to be good enough to justify a production change. So confidence is computed, not vibes:
+Chaos does this	Real cause	Correct response
+Pushes and deploys broken code	The app itself	Roll back to the last good version
+Deploys a bad config change	A setting, not the code	Undo the config
+Forces a payment provider to fail	Something outside our control	Don't touch our code — flip a "retry later" switch
+A harmless deploy and an outage together	Genuinely ambiguous	Escalate — say "I don't know"
 
-- Did the problem start right after a change? **+20 points**
-- Does the change actually touch the part of the app that's failing? **+20 points**
-- Did we reproduce the failure on the suspect version, in a real test? **+35 points**
-- Is the previous version clean when we test it the same way? **+25 points**
-- Is a third-party service reporting problems on its own status page? **+40 points** (for the "not our fault" theory)
-- Does the suspect version actually pass its tests? **−35 points** (evidence against blaming it)
+That last row is the point of the whole project. Most demos are built to look impressive; we built in a case where the right answer is to do nothing and be honest about why.
 
-NightShift only acts if one theory reaches 85%+, was actually tested, and clearly beats the next best guess by more than 15 points. Otherwise, it escalates.
+7. Approval: a real phone call
+Dashboard
+Judge's phone
+Voice API
+NightShift
+Dashboard
+Judge's phone
+Voice API
+NightShift
+alt
+[no answer in 2 min]
+Request approval: rollback(a1b2c3d)
+Calls, reads out the request
+Press 1 (approve) or 2 (reject)
+Falls back to Slack, then dashboard card
+Decision recorded, run resumes
 
-## Why a human still has to say yes
+If nobody responds anywhere within 2 minutes, that counts as a rejection — NightShift backs off rather than acting alone.
 
-Every action that changes production — rolling back a deploy, undoing a config, flipping a feature flag — pauses the whole process and waits for a real person. In the live demo, that's a real phone call: NightShift explains in plain language what it wants to do and why, and the person on the phone presses 1 to approve or 2 to reject. If nobody answers, it falls back to a chat message, then a button on a dashboard that's always available. If nobody responds within 2 minutes, it treats that as a "no" and backs off rather than acting alone.
+8. Try it yourself: nightshift-mvp.html
 
-This rule is enforced by the system itself, not just by the AI being told to be careful — even if the AI "decided" to skip the approval step, the underlying system wouldn't let the action through without a recorded yes from a human.
+No server, no setup — just open it in any browser.
 
-## What you can actually try right now
+Pick one of the four attacks (this simulates the judge's/Chaos's choice).
+Click "Run the incident" (auto-play) or "Next step" (one action at a time — better for presenting live).
+Answer the simulated phone call and press 1 or 2 yourself at the approval step.
+Watch the recovery checks, the reveal (what Chaos actually did vs. what NightShift concluded), the postmortem, and the proposed code fix.
+Click "Run another round" and try a different attack — including "Double trouble," to see it correctly say "I don't know."
 
-We built a single, self-contained web page — `nightshift-mvp.html` — that walks through this entire process interactively, without needing any of the real servers running. Open it in any browser:
+A scoreboard at the top tracks rounds and accuracy — escalating correctly on the ambiguous case counts as a correct call, not a miss.
 
-1. Pick one of the four attacks (this simulates what the judge/Chaos would choose).
-2. Click **"Run the incident"** to watch it play out automatically, or **"Next step"** to go one action at a time (better if you're presenting live and want to talk through each step).
-3. When it reaches the approval step, answer the simulated phone call and press 1 or 2 yourself.
-4. Watch the recovery checks, the reveal of what actually happened vs. what NightShift concluded, the generated incident report, and the code fix it proposes.
-5. Click **"Run another round"** and try a different attack — including the "double trouble" one, to see NightShift correctly say "I don't know."
+9. How to present this to judges (the full script)
 
-There's a running scoreboard at the top tracking how many rounds you've played and how many were handled correctly — including escalating being counted as the *correct* answer when the evidence really is ambiguous.
+Before you start: open the page full-screen. Decide your first attack — start with "Bad deploy", it's the clearest story. Save "Double trouble" for last, it's the twist ending.
 
-See `DEMO_GUIDE.md` for a short script if you're presenting this to judges.
+The 90-second pitch, before touching anything:
 
-## What's real vs. what's simulated in this MVP
+"NightShift is an AI agent that responds to production incidents. What makes it different: it never acts on a guess. It gathers evidence, proves its theory in a sandbox, scores its own confidence with fixed math, and calls a human before doing anything that touches production. If the evidence is weak, it says 'I don't know' instead of guessing. Watch."
 
-Being upfront about this:
+Walking through one round:
 
-- **The reasoning, the confidence scoring, the risk rules, and the four attack scenarios are the real design** — this is exactly what the full system is built to do (see the HLD document for the complete technical design).
-- **The MVP page itself is a scripted walkthrough**, not a live system with a real app, real logs, or a real phone line — it's built so anyone can see and understand the whole idea in a browser in two minutes, without spinning up servers.
-- **The full build** (real demo store, real monitoring, a real TrueForge-based agent, a real phone call through a voice API) is the next phase, laid out in the HLD's build plan.
+Point at the attack cards: "These four are the four things our adversary agent, Chaos, can do. I'll pick one — NightShift has no idea which." Click one.
+(Optional, technical judges) Point at the topology diagram: "NightShift and Chaos are separate agents with separate credentials — NightShift literally can't see the attack menu."
+Click "Next step" a few times, reading the evidence feed out loud. Every line is a real tool call and result — this is what proves it isn't a black box.
+At the confidence bars: "This number isn't a vibe — it's addition and subtraction against a fixed table. It only acts above 85%, with a clear lead over the next guess."
+When the phone-call card appears, click "Answer the call," read the transcript out loud, press 1. Say: "This is the point where most 'autonomous' agents would just act. Ours can't — this is enforced by the system, not a polite prompt."
+Watch the recovery checklist tick through: "It doesn't call this done because it thinks it's done — it's rechecking real metrics for 30 seconds first."
+At the reveal card: "Here's the answer key — what Chaos actually did, versus what NightShift concluded." Read the postmortem and proposed fix if there's time.
 
-## Where things stand
+The twist round — "Double trouble": click "Run another round," pick Double trouble, let it play out. When it escalates: "This is the part we're proudest of. It didn't roll anything back. It said 'I don't know,' showed its work, and told us what evidence would resolve it. An agent that knows when to stop is more trustworthy than one that always has an answer." Point at the scoreboard — the escalate counts as correct, not a failure.
 
-| Piece | Status |
-|---|---|
-| Overall design (HLD) | Done |
-| Interactive walkthrough (this MVP) | Done |
-| Real demo app + monitoring + deployer | Next |
-| Real NightShift agent on TrueForge | Next |
-| Real Chaos agent + attack menu | Next |
-| Real phone-call approvals | Next |
+If something goes wrong:
 
-## What's next, if we keep building this after the hackathon
+"Is this connected to a real app?" — Be honest: "This page is a scripted walkthrough of the real design. The confidence math and the four scenarios are exactly what the full system does. We didn't have AI credits for this event, so the live version with a real store, real monitoring, and a real phone call is the next build phase."
+Lose your place → click "Run another round", takes 10 seconds.
+Wifi drops → doesn't matter, the page needs nothing but the browser it's already open in.
 
-- **Memory** — reuse what it learned from past incidents so it's faster the second time the same bug happens.
-- **Earned trust** — NightShift starts out asking permission for everything risky, and could earn the right to act on its own for specific, well-proven kinds of fixes over time.
-- **Hooking into real tools** — Kubernetes, Datadog, PagerDuty, instead of our demo stand-ins.
+Quick answers to likely questions:
 
----
+Why not let it act without approval? A wrong autonomous rollback is worse than a 30-second delay for a human "yes."
+How is the confidence score not the AI making things up? Fixed point values applied to real evidence — anyone can re-check the arithmetic by hand.
+What if nobody answers the phone? Falls to Slack, then an always-on dashboard card; no answer within 2 minutes counts as "no."
+What stops NightShift from seeing what Chaos did? Separate agents, separate credentials, separate tools — an actual permissions boundary, not a prompt instruction.
+10. What's real vs. simulated
+Piece	Status
+Full design — architecture, scoring, risk rules, attack catalog	Real, complete
+Interactive walkthrough (nightshift-mvp.html)	Real, working, scripted
+Live demo app, monitor, deployer	Not built — blocked without AI credits/compute
+Real NightShift/Chaos agents on TrueForge	Not built — same reason
+Real phone-call approvals via a voice API	Not built — same reason
 
-*For the full technical design — architecture diagrams, data model, tool list, and the exact build schedule — see the HLD document.*
+Because we had no AI credits for this event, we couldn't run any actual model calls, so the live end-to-end system doesn't exist yet — only its complete design and a faithful, hand-scripted walkthrough of exactly how it would behave. Every number, threshold, and outcome shown in the walkthrough matches the real design; nothing in it is decorative.
+
+11. Where this goes next
+Memory — reuse lessons from past incidents to resolve repeats faster.
+Earned trust — NightShift starts by asking permission for everything risky, and could earn autonomy for specific, well-proven fixes over time.
+Real integrations — Kubernetes, Datadog/Prometheus, PagerDuty, instead of our demo stand-ins.

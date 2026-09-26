@@ -99,3 +99,7 @@ Being upfront about this:
 ---
 
 *For the full technical design — architecture diagrams, data model, tool list, and the exact build schedule — see the HLD document.*
+
+---
+
+**AI credit not given**

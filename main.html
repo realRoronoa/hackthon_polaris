@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>NightShift — Autonomous Incident Response</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0A0F1C; --panel:#101A2E; --panel2:#0D1526; --border:#20304C;
+  --text:#E7ECF6; --muted:#7C8AAA; --dim:#4E6083;
+  --safe:#34D399; --low:#60A5FA; --high:#F5A524; --danger:#F87171;
+  padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+  box-sizing:border-box;
+}
+*{box-sizing:border-box;}
+html{scroll-padding-top:env(safe-area-inset-top,0px);}
+body{margin:0;background:var(--bg);color:var(--text);font-family:'IBM Plex Sans',system-ui,sans-serif;line-height:1.5;}
+.mono{font-family:'IBM Plex Mono',monospace;}
+a{color:var(--low);}
+h1,h2,h3{margin:0;}
+
+.topbar{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  padding:calc(10px + env(safe-area-inset-top,0px)) 20px 10px;background:rgba(10,15,28,.94);
+  backdrop-filter:blur(6px);border-bottom:1px solid var(--border);}
+.logo{font-weight:700;font-size:16px;letter-spacing:.02em;}
+.logo span{color:var(--high);}
+.statuspill{font-family:'IBM Plex Mono',monospace;font-size:12px;padding:4px 10px;border-radius:100px;
+  border:1px solid var(--border);color:var(--muted);}
+.statuspill.live{color:var(--high);border-color:var(--high);}
+.statuspill.resolved{color:var(--safe);border-color:var(--safe);}
+.statuspill.escalated{color:var(--low);border-color:var(--low);}
+.topbar .spacer{flex:1;}
+.scorepill{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--muted);}
+.scorepill b{color:var(--text);}
+.clock{font-family:'IBM Plex Mono',monospace;color:var(--dim);font-size:12px;}
+
+main{max-width:1120px;margin:0 auto;padding:26px 20px 90px;}
+
+.hero{padding:26px 0 18px;border-bottom:1px solid var(--border);margin-bottom:24px;}
+.hero h1{font-size:32px;margin:0 0 8px;font-weight:700;letter-spacing:-.01em;}
+.hero p{color:var(--muted);max-width:62ch;margin:0;font-size:15px;}
+
+.picker-label{font-size:13px;color:var(--muted);margin-bottom:10px;}
+.picker{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:22px;}
+@media(max-width:820px){.picker{grid-template-columns:repeat(2,1fr);}}
+.atk{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:left;
+  cursor:pointer;transition:border-color .15s;font-family:'IBM Plex Sans',sans-serif;color:var(--text);}
+.atk:hover{border-color:var(--dim);}
+.atk.active{border-color:var(--high);background:rgba(245,165,36,.06);}
+.atk .name{font-weight:600;font-size:13.5px;margin-bottom:4px;}
+.atk .out{font-size:11.5px;color:var(--dim);}
+.atk.hidden-info .out::before{content:'? ';}
+
+.diagram{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:24px;}
+.diagram h2{font-size:12.5px;color:var(--muted);font-weight:600;margin-bottom:12px;}
+.dgrid{display:grid;gap:8px;}
+.drow{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;}
+.drow.small{grid-template-columns:repeat(3,1fr);max-width:60%;}
+.dbox{background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:8px 6px;
+  text-align:center;font-size:11px;color:var(--muted);}
+.dbox.hl{border-color:var(--high);color:var(--high);}
+.dbox.hl2{border-color:var(--low);color:var(--low);}
+.darrow{text-align:center;color:var(--dim);font-size:14px;}
+.dcaption{font-size:11px;color:var(--dim);margin-top:8px;}
+
+.controls{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:24px;}
+button{font-family:'IBM Plex Sans',sans-serif;font-weight:600;font-size:14px;border-radius:8px;
+  padding:10px 16px;cursor:pointer;border:1px solid var(--border);background:var(--panel);color:var(--text);
+  transition:border-color .15s;}
+button:hover{border-color:var(--dim);}
+button.primary{background:var(--high);border-color:var(--high);color:#1a1300;}
+button.primary:hover{background:#ffb840;}
+button.ghost{background:transparent;}
+button:disabled{opacity:.4;cursor:not-allowed;}
+button.approve{background:var(--safe);border-color:var(--safe);color:#052014;}
+button.reject{background:var(--danger);border-color:var(--danger);color:#2a0505;}
+button.keypad{font-size:20px;padding:14px;min-width:64px;}
+
+.stepper{display:flex;gap:0;margin-bottom:24px;overflow-x:auto;padding-bottom:4px;}
+.step{flex:1;min-width:80px;text-align:center;position:relative;padding:10px 4px;}
+.step .dot{width:9px;height:9px;border-radius:50%;background:var(--border);margin:0 auto 8px;transition:.2s;}
+.step .lbl{font-size:10.5px;color:var(--dim);font-family:'IBM Plex Mono',monospace;}
+.step::after{content:'';position:absolute;top:15px;right:0;width:100%;height:1px;background:var(--border);z-index:0;}
+.step:last-child::after{display:none;}
+.step.done .dot{background:var(--safe);} .step.done .lbl{color:var(--safe);}
+.step.active .dot{background:var(--high);box-shadow:0 0 0 4px rgba(245,165,36,.2);} .step.active .lbl{color:var(--high);}
+.step.skip .dot{background:var(--border);} .step.skip .lbl{color:var(--dim);text-decoration:line-through;}
+
+.grid{display:grid;grid-template-columns:1.3fr 1fr;gap:20px;}
+@media(max-width:760px){.grid{grid-template-columns:1fr;}}
+
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:18px 18px 16px;margin-bottom:18px;}
+.panel h2{font-size:13px;color:var(--muted);margin:0 0 12px;font-weight:600;display:flex;justify-content:space-between;align-items:center;}
+
+.log{font-family:'IBM Plex Mono',monospace;font-size:12px;max-height:320px;overflow-y:auto;}
+.log .row{display:flex;gap:8px;padding:6px 0;border-bottom:1px solid var(--panel2);align-items:baseline;}
+.log .row:last-child{border-bottom:none;}
+.tag{font-size:10px;padding:1px 6px;border-radius:4px;font-weight:600;white-space:nowrap;}
+.tag.SAFE{color:var(--safe);background:rgba(52,211,153,.12);}
+.tag.HIGH{color:var(--high);background:rgba(245,165,36,.14);}
+.tag.EVENT{color:var(--low);background:rgba(96,165,250,.12);}
+.tag.DECIDE{color:#c4b5fd;background:rgba(196,181,253,.12);}
+.tag.VERIFY{color:var(--low);background:rgba(96,165,250,.12);}
+.tag.DONE{color:var(--safe);background:rgba(52,211,153,.12);}
+.tag.ESC{color:var(--low);background:rgba(96,165,250,.12);}
+.log .empty{color:var(--dim);padding:8px 0;}
+
+.bar-row{margin-bottom:14px;}
+.bar-row .top{display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:5px;}
+.bar-row .track{height:8px;background:var(--panel2);border-radius:5px;overflow:hidden;}
+.bar-row .fill{height:100%;border-radius:5px;width:0%;transition:width .8s ease;}
+.bar-row.a .fill{background:var(--danger);}
+.bar-row.b .fill{background:var(--dim);}
+.threshold-note{font-size:11.5px;color:var(--muted);margin-top:6px;}
+
+.phonecard{border:1px solid var(--high);background:rgba(245,165,36,.06);border-radius:10px;padding:16px;}
+.phonecard .head{display:flex;align-items:center;gap:10px;font-size:13px;font-weight:600;color:var(--high);margin-bottom:10px;}
+.ringdot{width:10px;height:10px;border-radius:50%;background:var(--high);animation:pulse 1s infinite;}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(245,165,36,.5);}70%{box-shadow:0 0 0 10px rgba(245,165,36,0);}100%{box-shadow:0 0 0 0 rgba(245,165,36,0);}}
+.transcript{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--muted);background:var(--panel2);
+  border-radius:8px;padding:10px 12px;margin:10px 0;display:none;}
+.chain{font-size:11px;color:var(--dim);margin:8px 0 12px;}
+.chain b{color:var(--high);}
+.callrow{display:flex;gap:8px;flex-wrap:wrap;}
+.keypadrow{display:none;gap:10px;margin-top:12px;align-items:center;}
+.keypadrow .khint{font-size:11px;color:var(--dim);}
+
+.escalatecard{border:1px solid var(--low);background:rgba(96,165,250,.06);border-radius:10px;padding:16px;}
+.escalatecard .head{color:var(--low);font-weight:600;font-size:13.5px;margin-bottom:8px;}
+.escalatecard ul{margin:8px 0 0;padding-left:18px;font-size:12.5px;color:var(--muted);}
+
+.checklist{display:flex;flex-direction:column;gap:8px;}
+.check{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--dim);opacity:.5;transition:.3s;}
+.check.pass{opacity:1;color:var(--text);}
+.check .box{width:16px;height:16px;border-radius:4px;border:1px solid var(--border);flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;font-size:10px;}
+.check.pass .box{background:var(--safe);border-color:var(--safe);color:#052014;}
+
+.reveal{border:1px solid var(--safe);background:rgba(52,211,153,.06);border-radius:10px;padding:18px;}
+.correct{display:inline-flex;align-items:center;gap:6px;color:var(--safe);font-weight:600;font-size:13px;margin-bottom:12px;}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0;}
+.cell{background:var(--panel2);border-radius:8px;padding:12px;}
+.cell .k{font-size:11px;color:var(--dim);margin-bottom:4px;}
+.cell .v{font-family:'IBM Plex Mono',monospace;font-size:13px;}
+.subblock{margin-top:14px;}
+.subblock h3{font-size:12px;color:var(--muted);margin-bottom:6px;}
+.postmortem{font-size:12.5px;color:var(--muted);background:var(--panel2);border-radius:8px;padding:12px;white-space:pre-wrap;font-family:'IBM Plex Mono',monospace;}
+.prcard{border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:12.5px;background:var(--panel2);}
+.prcard .prtitle{color:var(--text);font-weight:600;margin-bottom:4px;}
+.prcard .diffline{font-family:'IBM Plex Mono',monospace;font-size:11.5px;}
+.diffline.add{color:var(--safe);}
+
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:26px 0;}
+@media(max-width:760px){.stats{grid-template-columns:repeat(2,1fr);}}
+.stat{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px;}
+.stat .v{font-family:'IBM Plex Mono',monospace;font-size:20px;color:var(--high);}
+.stat .k{font-size:11.5px;color:var(--muted);margin-top:3px;}
+
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin-top:6px;}
+.legend b{color:var(--text);}
+footer{border-top:1px solid var(--border);padding-top:20px;margin-top:10px;color:var(--dim);font-size:12.5px;}
+footer p{max-width:70ch;}
+.credits{margin-top:18px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--dim);text-align:center;letter-spacing:.03em;}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="logo">NIGHT<span>SHIFT</span></div>
+  <div class="statuspill" id="statuspill">IDLE</div>
+  <div class="spacer"></div>
+  <div class="scorepill">Rounds <b id="scRounds">0</b> · Correct calls <b id="scCorrect">0</b> · Accuracy <b id="scAcc">—</b></div>
+  <div class="clock" id="clock">t + 0.0s</div>
+</div>
+
+<main>
+  <section class="hero">
+    <h1>An agent that proves the cause before it touches production.</h1>
+    <p>NightShift watches a live app, investigates with real tools, reproduces the failure in a sandbox, scores its confidence, and only acts once the evidence clears a bar — calling a human first for anything risky. Chaos picks the fault below; NightShift is never told which one.</p>
+  </section>
+
+  <div class="picker-label">1 · Judge picks an attack (this is Chaos's move — hidden from NightShift)</div>
+  <div class="picker" id="picker"></div>
+
+  <div class="diagram">
+    <h2>System topology — who talks to whom</h2>
+    <div class="dgrid">
+      <div class="drow">
+        <div class="dbox">Dashboard</div><div class="dbox">Demo store</div><div class="dbox hl">📞 Judge's phone</div><div class="dbox">GitHub</div><div class="dbox">Voice API</div>
+      </div>
+      <div class="drow small" style="margin:2px auto;"><div class="darrow">↕ events / calls</div></div>
+      <div class="drow">
+        <div class="dbox hl2">Control API</div><div class="dbox">Audit store</div><div class="dbox hl2">NightShift</div><div class="dbox">Chaos</div><div class="dbox">Sandbox</div>
+      </div>
+      <div class="drow small" style="margin:2px auto;"><div class="darrow">↕ tool calls</div></div>
+      <div class="drow">
+        <div class="dbox">Demo app</div><div class="dbox">Payment mock</div><div class="dbox">Monitor</div><div class="dbox">Deployer</div><div class="dbox">Traffic gen</div>
+      </div>
+    </div>
+    <div class="dcaption">NightShift and Chaos run as separate processes with separate credentials — NightShift can't reach the attack menu or the fault-injection endpoint; Chaos can't reach rollback tools.</div>
+  </div>
+
+  <div class="controls" id="runControls" style="display:none;">
+    <button class="primary" id="btnPlay">▶ Run the incident</button>
+    <button class="ghost" id="btnNext">Next step</button>
+    <button class="ghost" id="btnAnother">Run another round</button>
+  </div>
+
+  <div class="stepper" id="stepper" style="display:none;"></div>
+
+  <div class="grid" id="mainGrid" style="display:none;">
+    <div>
+      <div class="panel">
+        <h2>Live evidence feed <span class="mono" style="color:var(--dim);font-weight:400;">INC-0042</span></h2>
+        <div class="log" id="log"><div class="empty">Waiting for an incident to open…</div></div>
+      </div>
+
+      <div class="panel" id="approvalPanel" style="display:none;">
+        <h2>Approval requested</h2>
+        <div class="phonecard">
+          <div class="head"><span class="ringdot" id="ringdot"></span><span id="apHead">rollback(a1b2c3d) — HIGH risk, paused for a human</span></div>
+          <div class="chain">Channel order: <b>phone call</b> → Slack/WhatsApp → dashboard card (always on) · 2 min timeout = auto-reject</div>
+          <div class="callrow" id="callRow">
+            <button class="primary" id="btnAnswer">📞 Answer the call</button>
+            <button class="ghost" id="btnLetRing">Let it ring out → fall to dashboard</button>
+          </div>
+          <div class="transcript" id="transcript"></div>
+          <div class="keypadrow" id="keypadRow">
+            <button class="keypad approve" id="btnApprove">1</button>
+            <button class="keypad reject" id="btnReject">2</button>
+            <div class="khint">Press 1 to approve · Press 2 to reject</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" id="escalatePanel" style="display:none;">
+        <h2>NightShift's decision</h2>
+        <div class="escalatecard">
+          <div class="head">🤷 "I don't know — the evidence doesn't clear the bar."</div>
+          <div id="escalateBody" class="mono" style="font-size:12.5px;color:var(--muted);"></div>
+          <ul id="escalateList"></ul>
+        </div>
+      </div>
+
+      <div class="panel" id="revealPanel" style="display:none;"></div>
+    </div>
+
+    <div>
+      <div class="panel">
+        <h2>Confidence by candidate</h2>
+        <div class="bar-row a">
+          <div class="top"><span id="candALabel">Candidate A</span><span id="confAPct" class="mono">0%</span></div>
+          <div class="track"><div class="fill" id="confABar"></div></div>
+        </div>
+        <div class="bar-row b">
+          <div class="top"><span id="candBLabel">Candidate B</span><span id="confBPct" class="mono">0%</span></div>
+          <div class="track"><div class="fill" id="confBBar"></div></div>
+        </div>
+        <div class="threshold-note">Acts only if the top candidate is ≥85%, reproduced in sandbox, and leads the runner-up by &gt;15 points. Otherwise: escalate.</div>
+      </div>
+
+      <div class="panel" id="verifyPanel" style="display:none;">
+        <h2>Recovery verification <span class="mono" style="color:var(--dim);font-weight:400;">30s window</span></h2>
+        <div class="checklist" id="checklist">
+          <div class="check"><div class="box"></div><span id="chk1">Health check — SHA matches target</span></div>
+          <div class="check"><div class="box"></div>Error rate under 1%</div>
+          <div class="check"><div class="box"></div>5xx responses ≈ 0</div>
+          <div class="check"><div class="box"></div>Checkout success above 98%</div>
+          <div class="check"><div class="box"></div>p95 latency under 500ms</div>
+          <div class="check"><div class="box"></div>Incident error signature gone from logs</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="stats" id="statsRow" style="display:none;">
+    <div class="stat"><div class="v" id="statTTR">—</div><div class="k">Time to root cause</div></div>
+    <div class="stat"><div class="v" id="statConf">—</div><div class="k">Confidence at decision</div></div>
+    <div class="stat"><div class="v" id="statChannel">—</div><div class="k">Approval channel used</div></div>
+    <div class="stat"><div class="v" id="statVerify">—</div><div class="k">Outcome</div></div>
+  </div>
+
+  <footer>
+    <div class="legend">
+      <span><b>SAFE</b> — reads only, runs on its own</span>
+      <span><b>LOW</b> — writes a branch, PR or report</span>
+      <span><b>HIGH</b> — changes production, always pauses for a human</span>
+    </div>
+    <p style="margin-top:14px;">Four attacks, four correct behaviors: bad deploy → rollback, bad config → revert config, third-party outage → enable queue-and-retry (not a rollback), double trouble → escalate. NightShift never sees the attack menu, the Chaos agent, or its tools.</p>
+    <div class="credits">No AI credits was given</div>
+  </footer>
+</main>
+
+<script>
+const STAGES = ['Detect','Investigate','Prove','Score','Decide','Approve','Recover','Verify','Learn'];
+
+const ATTACKS = {
+  bad_deploy:{
+    name:'Bad deploy', out:'→ correct call: rollback',
+    candA:'Bad deploy · 7f82a1c', candB:'Dependency outage', conf:[96,6],
+    ticks:[
+      {stage:0,tag:'EVENT',text:'Monitor opened INC-0042 — error_rate 6.2% (threshold 5%)'},
+      {stage:1,tag:'SAFE',text:'get_metrics(5m) → error_rate 6.2%, running_sha 7f82a1c'},
+      {stage:1,tag:'SAFE',text:'get_deploy_history() → 7f82a1c deployed 41s before the spike'},
+      {stage:1,tag:'SAFE',text:'get_commit_diff(7f82a1c) → touches checkout payment handler'},
+      {stage:1,tag:'SAFE',text:'get_dependency_status() → payment provider /status: operational'},
+      {stage:2,tag:'SAFE',text:'sandbox_reproduce(7f82a1c) → FAIL: checkout test'},
+      {stage:2,tag:'SAFE',text:'sandbox_reproduce(a1b2c3d) → PASS: checkout test'},
+      {stage:3,tag:'SAFE',text:'compute_confidence(INC-0042) → deploy 96%, dependency 6%'}
+    ],
+    decision:{stage:4,tag:'DECIDE',text:'96% ≥ 85%, reproduced, gap 90pts → act: rollback(a1b2c3d)'},
+    action:{tool:'rollback(a1b2c3d)', head:'rollback(a1b2c3d) — HIGH risk, paused for a human'},
+    healthLabel:'SHA matches a1b2c3d',
+    chaosActual:'Bad deploy · pushed & deployed 7f82a1c',
+    concluded:'Bad deploy · 7f82a1c (96%)', actionTaken:'rollback → a1b2c3d',
+    pr:{title:'Add regression test: checkout handler null-pointer on empty cart',
+        diff:['+ test("checkout rejects empty cart gracefully", () => {','+   expect(checkout({items: []})).not.toThrow();','+ });']},
+    postmortem:'Incident: INC-0042\\nCause: commit 7f82a1c introduced a null-pointer in the checkout\\npayment handler for empty-cart edge cases.\\nDetected: monitor threshold breach, 41s after deploy.\\nProven: sandbox reproduction FAILed on 7f82a1c, PASSed on a1b2c3d.\\nAction: rollback to a1b2c3d, approved via phone call.\\nVerified: all 6 checks passed within 30s.\\nPrevention: regression test opened as PR.'
+  },
+  bad_config:{
+    name:'Bad config', out:'→ correct call: revert config',
+    candA:'Bad config · deploy 9c1f0ab', candB:'Bad deploy (code)', conf:[91,7],
+    ticks:[
+      {stage:0,tag:'EVENT',text:'Monitor opened INC-0043 — timeout error rate 8.1% (threshold 5%)'},
+      {stage:1,tag:'SAFE',text:'get_metrics(5m) → timeout_errors spiking, running_sha 9c1f0ab'},
+      {stage:1,tag:'SAFE',text:'get_deploy_history() → 9c1f0ab deployed 55s before the spike'},
+      {stage:1,tag:'SAFE',text:'get_commit_diff(9c1f0ab) → config/prod.json: payment_timeout_ms 3000→300'},
+      {stage:1,tag:'SAFE',text:'get_dependency_status() → payment provider /status: operational'},
+      {stage:2,tag:'SAFE',text:'sandbox_reproduce(9c1f0ab, config=prod) → FAIL: timeout on checkout'},
+      {stage:2,tag:'SAFE',text:'sandbox_reproduce(9c1f0ab, config=prev) → PASS: checkout test'},
+      {stage:3,tag:'SAFE',text:'compute_confidence(INC-0043) → config 91%, deploy-code 7%'}
+    ],
+    decision:{stage:4,tag:'DECIDE',text:'91% ≥ 85%, reproduced, gap 84pts → act: revert_config(prev)'},
+    action:{tool:'revert_config(prev)', head:'revert_config(prev) — HIGH risk, paused for a human'},
+    healthLabel:'config matches previous known-good',
+    chaosActual:'Bad config · payment_timeout_ms dropped to 300ms',
+    concluded:'Bad config · 9c1f0ab (91%)', actionTaken:'revert_config → prev',
+    pr:{title:'Add config validation: reject payment_timeout_ms below 1000',
+        diff:['+ if (config.payment_timeout_ms < 1000) throw new ConfigError();']},
+    postmortem:'Incident: INC-0043\\nCause: config/prod.json set payment_timeout_ms to 300, well under\\nthe payment provider\\'s typical response time.\\nDetected: monitor threshold breach, 55s after deploy.\\nProven: sandbox reproduction FAILed with new config, PASSed with previous.\\nAction: revert_config, approved via phone call.\\nVerified: all 6 checks passed within 30s.\\nPrevention: config validation opened as PR.'
+  },
+  outage:{
+    name:'3rd-party outage', out:'→ correct call: feature flag, not rollback',
+    candA:'Dependency outage', candB:'Bad deploy (code)', conf:[92,4],
+    ticks:[
+      {stage:0,tag:'EVENT',text:'Monitor opened INC-0044 — upstream 503s, error_rate 7.4%'},
+      {stage:1,tag:'SAFE',text:'get_metrics(5m) → 5xx spike, running_sha unchanged (b4d9e21)'},
+      {stage:1,tag:'SAFE',text:'get_logs() → repeated "upstream 503 from payment provider"'},
+      {stage:1,tag:'SAFE',text:'get_dependency_status() → payment provider /status: DEGRADED'},
+      {stage:1,tag:'SAFE',text:'get_deploy_history() → b4d9e21 deployed 3h ago, no recent change'},
+      {stage:2,tag:'SAFE',text:'sandbox_reproduce(b4d9e21) → PASS: checkout test'},
+      {stage:3,tag:'SAFE',text:'compute_confidence(INC-0044) → dependency 92%, deploy-code 4%'}
+    ],
+    decision:{stage:4,tag:'DECIDE',text:'92% ≥ 85%, deploy is clean → act: set_feature_flag(queue_and_retry, true)'},
+    action:{tool:'set_feature_flag(queue_and_retry=true)', head:'set_feature_flag(queue_and_retry) — HIGH risk, paused for a human'},
+    healthLabel:'feature flag applied, no rollback performed',
+    chaosActual:'Third-party outage · payment mock forced into 503 mode',
+    concluded:'Dependency outage (92%)', actionTaken:'set_feature_flag → queue_and_retry',
+    pr:{title:'Document queue-and-retry runbook for payment provider outages', diff:['+ ## Payment provider outage','+ Enable queue_and_retry; do not roll back a clean deploy.']},
+    postmortem:'Incident: INC-0044\\nCause: the payment provider\\'s public /status reported DEGRADED and\\nlogs showed repeated upstream 503s. The current deploy passed sandbox\\ntests cleanly.\\nDetected: monitor 5xx threshold breach.\\nProven: no code candidate reproduced a failure; dependency signal strong.\\nAction: enabled queue_and_retry feature flag — explicitly not a rollback.\\nVerified: all 6 checks passed within 30s.\\nPrevention: outage runbook opened as PR.'
+  },
+  double:{
+    name:'Double trouble', out:'→ correct call: escalate ("I don\\'t know")',
+    candA:'Bad deploy (code)', candB:'Dependency slowness', conf:[52,45],
+    ticks:[
+      {stage:0,tag:'EVENT',text:'Monitor opened INC-0045 — p95 latency 1400ms, error_rate 5.6%'},
+      {stage:1,tag:'SAFE',text:'get_metrics(5m) → latency and error rate both elevated'},
+      {stage:1,tag:'SAFE',text:'get_deploy_history() → e2a771f deployed 90s before the spike (harmless commit)'},
+      {stage:1,tag:'SAFE',text:'get_commit_diff(e2a771f) → touches logging only, unrelated to checkout'},
+      {stage:1,tag:'SAFE',text:'get_dependency_status() → payment provider /status: operational, but slow mode active'},
+      {stage:2,tag:'SAFE',text:'sandbox_reproduce(e2a771f) → INCONCLUSIVE: passes most runs, flaky under load'},
+      {stage:3,tag:'SAFE',text:'compute_confidence(INC-0045) → deploy 52%, dependency 45%'}
+    ],
+    decision:{stage:4,tag:'DECIDE',text:'Top candidate 52% < 85%, and gap to runner-up is only 7pts → escalate'},
+    escalate:true,
+    chaosActual:'Double trouble · harmless deploy + payment mock slow-mode, together',
+    concluded:'Escalated — no single cause cleared the bar',
+    nextEvidence:['Extend sandbox reproduction runs to rule out flakiness','Pull a longer dependency-latency window to separate the two signals','Ask on-call to confirm whether e2a771f is safe to rule out manually']
+  }
+};
+
+let current = null, idx = 0, playing = false, awaitingDecision = false, startTime = null, clockTimer = null, channelUsed = null;
+let score = {rounds:0, correct:0};
+
+const picker = document.getElementById('picker');
+Object.keys(ATTACKS).forEach(key=>{
+  const a = ATTACKS[key];
+  const btn = document.createElement('button');
+  btn.className = 'atk'; btn.dataset.key = key;
+  btn.innerHTML = `<div class="name">${a.name}</div><div class="out">${a.out}</div>`;
+  btn.addEventListener('click', ()=> startRound(key));
+  picker.appendChild(btn);
+});
+
+const stepperEl = document.getElementById('stepper');
+STAGES.forEach((s,i)=>{
+  const d = document.createElement('div'); d.className='step'; d.id='step'+i;
+  d.innerHTML = `<div class="dot"></div><div class="lbl">${s}</div>`;
+  stepperEl.appendChild(d);
+});
+
+const logEl = document.getElementById('log');
+const btnPlay = document.getElementById('btnPlay');
+const btnNext = document.getElementById('btnNext');
+const statuspill = document.getElementById('statuspill');
+
+function resetPanels(){
+  document.getElementById('approvalPanel').style.display='none';
+  document.getElementById('escalatePanel').style.display='none';
+  document.getElementById('revealPanel').style.display='none';
+  document.getElementById('verifyPanel').style.display='none';
+  document.getElementById('statsRow').style.display='none';
+  logEl.innerHTML = '<div class="empty">Waiting for an incident to open…</div>';
+  document.querySelectorAll('.check').forEach(c=>{c.classList.remove('pass'); c.querySelector('.box').textContent='';});
+  document.getElementById('transcript').style.display='none';
+  document.getElementById('transcript').textContent='';
+  document.getElementById('keypadRow').style.display='none';
+  document.getElementById('callRow').style.display='flex';
+  document.getElementById('ringdot').style.display='inline-block';
+}
+
+function startRound(key){
+  current = ATTACKS[key];
+  idx = 0; awaitingDecision = false; playing = false; channelUsed = null;
+  document.querySelectorAll('.atk').forEach(b=> b.classList.toggle('active', b.dataset.key===key));
+  document.getElementById('candALabel').textContent = current.candA;
+  document.getElementById('candBLabel').textContent = current.candB;
+  setConf(0,0);
+  resetPanels();
+  setStage(-1);
+  document.querySelectorAll('.step').forEach(s=>s.classList.remove('skip'));
+  document.getElementById('runControls').style.display='flex';
+  document.getElementById('stepper').style.display='flex';
+  document.getElementById('mainGrid').style.display='grid';
+  btnPlay.disabled=false; btnNext.disabled=false;
+  btnPlay.textContent='▶ Run the incident';
+  statuspill.textContent='IDLE'; statuspill.className='statuspill';
+  document.getElementById('chk1').textContent = 'Health check — ' + current.healthLabel;
+  window.scrollTo({top: document.getElementById('runControls').offsetTop-80, behavior:'smooth'});
+}
+
+function setStage(n){
+  STAGES.forEach((_,i)=>{
+    const el = document.getElementById('step'+i);
+    el.classList.remove('active','done');
+    if(i < n) el.classList.add('done');
+    if(i === n) el.classList.add('active');
+  });
+}
+function pushLog(tag, text){
+  if(logEl.querySelector('.empty')) logEl.innerHTML='';
+  const row = document.createElement('div'); row.className='row';
+  row.innerHTML = `<span class="tag ${tag}">${tag}</span><span>${text}</span>`;
+  logEl.appendChild(row); logEl.scrollTop = logEl.scrollHeight;
+}
+function setConf(a,b){
+  document.getElementById('confABar').style.width=a+'%';
+  document.getElementById('confBBar').style.width=b+'%';
+  document.getElementById('confAPct').textContent=a+'%';
+  document.getElementById('confBPct').textContent=b+'%';
+  document.getElementById('statConf').textContent=a+'%';
+}
+function runChecklist(){
+  const items = document.querySelectorAll('.check');
+  document.getElementById('verifyPanel').style.display='block';
+  items.forEach((item,i)=>{
+    setTimeout(()=>{
+      item.classList.add('pass'); item.querySelector('.box').textContent='✓';
+      if(i===items.length-1) finishRound(true);
+    }, i*380);
+  });
+}
+function startClock(){
+  startTime = Date.now();
+  clockTimer = setInterval(()=>{
+    document.getElementById('clock').textContent = 't + ' + ((Date.now()-startTime)/1000).toFixed(1) + 's';
+  }, 100);
+}
+function stopClock(){ clearInterval(clockTimer); return ((Date.now()-startTime)/1000).toFixed(1); }
+
+function advance(){
+  if(!current || awaitingDecision) return;
+  if(idx < current.ticks.length){
+    const t = current.ticks[idx];
+    if(idx===0){ statuspill.textContent='LIVE'; statuspill.className='statuspill live'; startClock(); }
+    setStage(t.stage); pushLog(t.tag, t.text);
+    idx++;
+    return;
+  }
+  if(idx === current.ticks.length){
+    setStage(current.decision.stage); pushLog(current.decision.tag, current.decision.text);
+    setConf(current.conf[0], current.conf[1]);
+    idx++;
+    if(current.escalate){ doEscalate(); }
+    return;
+  }
+  if(idx === current.ticks.length+1 && current.action){
+    setStage(5);
+    document.getElementById('apHead').textContent = current.action.head;
+    document.getElementById('approvalPanel').style.display='block';
+    awaitingDecision = true; playing=false; btnPlay.textContent='▶ Run the incident';
+    idx++;
+    return;
+  }
+  if(idx === current.ticks.length+2){
+    setStage(6); pushLog('HIGH', 'Approved via '+channelUsed+' — executing '+current.action.tool);
+    idx++;
+    return;
+  }
+  if(idx === current.ticks.length+3){
+    setStage(7); pushLog('VERIFY', 'Sampling production metrics for 30s…');
+    runChecklist();
+    idx++;
+    return;
+  }
+}
+
+function doEscalate(){
+  setStage(4);
+  ['5','6','7'].forEach(n=>document.getElementById('step'+n).classList.add('skip'));
+  pushLog('ESC', 'escalate(INC-0045) — "I don\\'t know", listing candidates + next evidence');
+  document.getElementById('escalatePanel').style.display='block';
+  document.getElementById('escalateBody').textContent =
+    current.candA+': '+current.conf[0]+'%   |   '+current.candB+': '+current.conf[1]+'%   (gap too small, act threshold not met)';
+  const list = document.getElementById('escalateList'); list.innerHTML='';
+  current.nextEvidence.forEach(e=>{ const li=document.createElement('li'); li.textContent=e; list.appendChild(li); });
+  finishRound(true); // escalating on an ambiguous case is the correct call
+}
+
+document.getElementById('btnAnswer').addEventListener('click', ()=>{
+  channelUsed = 'phone call';
+  document.getElementById('ringdot').style.display='none';
+  document.getElementById('callRow').style.display='none';
+  const tr = document.getElementById('transcript');
+  tr.style.display='block';
+  tr.textContent = 'Voice API: "NightShift needs approval — '+current.action.tool+'. Press 1 to approve, 2 to reject."';
+  document.getElementById('keypadRow').style.display='flex';
+});
+document.getElementById('btnLetRing').addEventListener('click', ()=>{
+  channelUsed = 'dashboard card';
+  document.getElementById('ringdot').style.display='none';
+  document.getElementById('callRow').style.display='none';
+  const tr = document.getElementById('transcript');
+  tr.style.display='block';
+  tr.textContent = 'Call unanswered → Slack/WhatsApp unavailable in this demo → dashboard card shown: '+current.action.tool;
+  document.getElementById('keypadRow').style.display='flex';
+});
+
+function decide(approved){
+  document.getElementById('approvalPanel').style.display='none';
+  awaitingDecision = false;
+  if(approved){
+    advance(); // moves to executing tick
+    if(playing) autoLoop();
+  } else {
+    pushLog('EVENT', 'Rejected by human — NightShift escalates instead of acting.');
+    statuspill.textContent='ESCALATED'; statuspill.className='statuspill escalated';
+    finishRound(false); // human veto isn't scored against the model's own call
+    playing=false; btnPlay.disabled=true; btnNext.disabled=true;
+  }
+}
+document.getElementById('btnApprove').addEventListener('click', ()=> decide(true));
+document.getElementById('btnReject').addEventListener('click', ()=> decide(false));
+
+function finishRound(countAsCorrect){
+  if(current.escalate || (idx > current.ticks.length && !document.getElementById('verifyPanel').offsetParent === null)){}
+  if(current.escalate){
+    statuspill.textContent='ESCALATED'; statuspill.className='statuspill escalated';
+    const secs = stopClock();
+    document.getElementById('statsRow').style.display='grid';
+    document.getElementById('statTTR').textContent = secs+'s';
+    document.getElementById('statChannel').textContent = '—';
+    document.getElementById('statVerify').textContent = 'Escalated ✓';
+    document.getElementById('statConf').textContent = current.conf[0]+'%';
+    tally(true);
+    return;
+  }
+  // rollback/config/flag success path
+  statuspill.textContent='RESOLVED'; statuspill.className='statuspill resolved';
+  const secs = stopClock();
+  document.getElementById('statsRow').style.display='grid';
+  document.getElementById('statTTR').textContent = secs+'s';
+  document.getElementById('statChannel').textContent = channelUsed || '—';
+  document.getElementById('statVerify').textContent = 'Verified ✓';
+  const rp = document.getElementById('revealPanel');
+  rp.style.display='block';
+  rp.innerHTML = `<div class="reveal">
+    <div class="correct">✓ Correct root cause, verified recovery</div>
+    <div class="row2">
+      <div class="cell"><div class="k">Chaos injected</div><div class="v">${current.chaosActual}</div></div>
+      <div class="cell"><div class="k">NightShift concluded</div><div class="v">${current.concluded}</div></div>
+      <div class="cell"><div class="k">Action taken</div><div class="v">${current.actionTaken}</div></div>
+      <div class="cell"><div class="k">Approval channel</div><div class="v">${channelUsed}</div></div>
+    </div>
+    <div class="subblock"><h3>Postmortem</h3><div class="postmortem">${current.postmortem}</div></div>
+    <div class="subblock"><h3>Prevention PR opened</h3>
+      <div class="prcard"><div class="prtitle">${current.pr.title}</div>
+      ${current.pr.diff.map(l=>`<div class="diffline add mono">${l}</div>`).join('')}</div>
+    </div>
+  </div>`;
+  btnPlay.disabled=true; btnNext.disabled=true;
+  tally(countAsCorrect);
+}
+
+function tally(correct){
+  score.rounds++; if(correct) score.correct++;
+  document.getElementById('scRounds').textContent = score.rounds;
+  document.getElementById('scCorrect').textContent = score.correct;
+  document.getElementById('scAcc').textContent = Math.round(100*score.correct/score.rounds)+'%';
+}
+
+function autoLoop(){
+  if(!playing || !current || awaitingDecision) return;
+  const before = idx;
+  advance();
+  if(idx===before) return; // round ended
+  if(!awaitingDecision) setTimeout(autoLoop, 950);
+}
+btnPlay.addEventListener('click', ()=>{ if(!current||awaitingDecision) return; playing=true; btnPlay.textContent='⏸ Playing…'; autoLoop(); });
+btnNext.addEventListener('click', ()=>{ playing=false; btnPlay.textContent='▶ Run the incident'; advance(); });
+document.getElementById('btnAnother').addEventListener('click', ()=>{
+  document.getElementById('mainGrid').style.display='none';
+  document.getElementById('runControls').style.display='none';
+  document.getElementById('stepper').style.display='none';
+  document.getElementById('statsRow').style.display='none';
+  document.querySelectorAll('.atk').forEach(b=>b.classList.remove('active'));
+  current=null;
+  window.scrollTo({top:0, behavior:'smooth'});
+});
+</script>
+</body>
+</html>
